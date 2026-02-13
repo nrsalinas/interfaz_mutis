@@ -185,7 +185,7 @@ if st.session_state.consulta == "Búsqueda":
 
 			st.text_input(
 				label="Colector principal",
-				help="Apellido del colector principal.",
+				help="Consulta preliminar del nombre del colector.",
 				placeholder="Colector",
 				value=None,
 				key="colector_pre"
