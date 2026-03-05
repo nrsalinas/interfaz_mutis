@@ -22,6 +22,8 @@
 #TODO 
 #TODO###########################################################################
 
+import re
+from functools import reduce
 import datetime
 import pytz
 import streamlit as st
@@ -32,8 +34,30 @@ today = datetime.datetime.now()
 yesterday = today - datetime.timedelta(1)
 today_date = datetime.date(today.year, today.month, today.day)
 yesterday_date = datetime.date(yesterday.year, yesterday.month, yesterday.day)
-
 tz = pytz.timezone('America/Bogota')
+
+locs = [
+	"Usaquén",
+	"Chapinero"
+	"Santa Fe",
+	"San Cristóbal",
+	"Usme",
+	"Tunjuelito",
+	"Bosa",
+	"Kennedy",
+	"Fontibón",
+	"Engativá",
+	"Suba",
+	"Barrios Unidos",
+	"Teusaquillo",
+	"Los Mártires",
+	"Antonio Nariño",
+	"Puente Aranda",
+	"La Candelaria",
+	"Rafael Uribe Uribe",
+	"Ciudad Bolívar",
+	"Sumapaz"
+]
 
 if not "username" in st.session_state: st.session_state.username = ""
 if not "password" in st.session_state: st.session_state.password = ""
@@ -42,6 +66,7 @@ if not "consulta" in st.session_state: st.session_state.consulta = None
 if not "query" in st.session_state: st.session_state.query = None
 if not "colector_posible" in st.session_state: st.session_state.colector_posible = []
 if not "colector_pre" in st.session_state: st.session_state.colector_pre = None
+if not "colectores" in st.session_state: st.session_state.colectores = []
 if not "taxon_sug" in st.session_state: st.session_state.taxon_sug = []
 
 
@@ -79,20 +104,33 @@ def close_db():
 
 
 def validate_search():
-	query = "select * "
+	query = "SELECT * "
 
-	if st.session_state.colector:
-		query += f"from Occurrences where Collector = {st.session_state.colector}"
+	if len(st.session_state.colectores) > 0:
 
+		# Not a simple and readable solution, but elegantly avoids keeping a second 
+		# list for People IDs	
+		nums = reduce(
+			lambda x,y : x+y, 
+			map(
+				lambda x: re.findall(r"\(ID: (\d+)\)", x), 
+				st.session_state.colectores
+			)
+		)
+
+		collstr = ", ".join(nums)
+		query += f"FROM Occurrences WHERE Collector IN ({collstr}) "
+
+		error_window(query)
 
 def buscar_colector():
 
 	sugg = pd.read_sql_query(
-		f"SELECT DISTINCT LastName, FirstName FROM Occurrences LEFT JOIN PeoplePersons ON Occurrences.Collector=PeoplePersons.People LEFT JOIN Persons ON PersonID=Person WHERE LastName REGEXP '{st.session_state.colector_pre}'",
+		f"SELECT DISTINCT LastName, FirstName, People FROM Occurrences LEFT JOIN PeoplePersons ON Occurrences.Collector=PeoplePersons.People LEFT JOIN Persons ON PersonID=Person WHERE LastName REGEXP '{st.session_state.colector_pre}'",
 		st.session_state.connection
 	)
 
-	sugg["name"] = sugg.LastName.apply(str) + ", " + sugg.FirstName.apply(str)
+	sugg["name"] = sugg.LastName.apply(str) + ", " + sugg.FirstName.apply(str) + " (ID: " +  sugg.People.apply(str) + ")"
 
 	st.session_state.colector_posible = sugg.name.tolist()
 
@@ -248,6 +286,7 @@ if st.session_state.consulta == "Búsqueda":
 				key="fecha_f"
 			)
 
+
 		st.markdown("-----\n### Táxon\nSi está interesado en buscar registros de un grupo taxonómico, primero digite parte del nombre del taxón en la caja de la izquierda y presione el botón `Buscar táxon`. A continuación los nombres taxonómicos sugeridos aparecerán en la caja de la derecha. Seleccione las opciones que se ajustan a su criterio de búsqueda.")
 
 
@@ -311,3 +350,6 @@ if st.session_state.consulta == "Búsqueda":
 		if st.session_state.query:
 			st.markdown(st.session_state.query)
 exit()
+
+
+
