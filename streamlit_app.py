@@ -35,20 +35,14 @@ yesterday_date = datetime.date(yesterday.year, yesterday.month, yesterday.day)
 
 tz = pytz.timezone('America/Bogota')
 
-if not "username" in st.session_state:
-	st.session_state.username = ""
-	
-if not "password" in st.session_state:
-	st.session_state.password = ""
-
-if not "connection" in st.session_state:
-	st.session_state.connection = None
-
-if not "consulta" in st.session_state:
-	st.session_state.consulta = None
-
-if not "query" in st.session_state:
-	st.session_state.query = None
+if not "username" in st.session_state: st.session_state.username = ""
+if not "password" in st.session_state: st.session_state.password = ""
+if not "connection" in st.session_state: st.session_state.connection = None
+if not "consulta" in st.session_state: st.session_state.consulta = None
+if not "query" in st.session_state: st.session_state.query = None
+if not "colector_posible" in st.session_state: st.session_state.colector_posible = []
+if not "colector_pre" in st.session_state: st.session_state.colector_pre = None
+if not "taxon_sug" in st.session_state: st.session_state.taxon_sug = []
 
 
 @st.dialog("Error")
@@ -56,8 +50,8 @@ def error_window(message):
 	st.write(message)
 
 
-def validate_user_debug():
-	st.session_state.connection = True
+#def validate_user_debug():
+#	st.session_state.connection = True
 
 
 def validate_user():
@@ -92,12 +86,25 @@ def validate_search():
 
 
 def buscar_colector():
-	#
-	# do something with st.session_state.colector_pre
-	#
-	st.session_state.colector_posible = [
-		"Colector 0", "Colector 1", "Colector 2", "Colector 3"
-	]
+
+	sugg = pd.read_sql_query(
+		f"SELECT DISTINCT LastName, FirstName FROM Occurrences LEFT JOIN PeoplePersons ON Occurrences.Collector=PeoplePersons.People LEFT JOIN Persons ON PersonID=Person WHERE LastName REGEXP '{st.session_state.colector_pre}'",
+		st.session_state.connection
+	)
+
+	sugg["name"] = sugg.LastName.apply(str) + ", " + sugg.FirstName.apply(str)
+
+	st.session_state.colector_posible = sugg.name.tolist()
+
+
+def buscar_taxon():
+
+	sugg = pd.read_sql_query(
+		f"SELECT Name FROM Taxa WHERE Name REGEXP '{st.session_state.taxon_pre}'",
+		st.session_state.connection
+	)
+
+	st.session_state.taxon_sug = sugg.Name.tolist()
 
 
 with st.form(
@@ -122,7 +129,7 @@ with st.form(
 		type="password",
 	)
 
-	st.form_submit_button('Validar', on_click=validate_user_debug)
+	st.form_submit_button('Validar', on_click=validate_user)
 
 
 #####     Botón de cierre de conección
@@ -194,15 +201,14 @@ if st.session_state.consulta == "Búsqueda":
 			st.form_submit_button('Buscar colector', on_click=buscar_colector)
 
 		with b1:
-			if "colector_posible" in st.session_state:
 
-				st.multiselect(
-					label="Colectores sugeridos",
-					help="Colectores encontrados en la base de datos con similaridad a la consulta preliminar.",
-					options=st.session_state.colector_posible,
-					key="colectores",
-					accept_new_options=False
-				)
+			st.multiselect(
+				label="Colectores sugeridos",
+				help="Colectores encontrados en la base de datos con similaridad a la consulta preliminar.",
+				options=st.session_state.colector_posible,
+				key="colectores",
+				accept_new_options=False
+			)
 
 		######     Formato de número de colección
 
@@ -216,22 +222,63 @@ if st.session_state.consulta == "Búsqueda":
 			key="no_coleccion"
 		)
 
-		st.date_input(
-			label="Fecha colecta",
-			help="Rango de fechas de colecta u observación.",
-			value=(yesterday_date, today_date),
-			min_value=datetime.date(1400, 1, 1),
-			max_value="today",
-			key="fecha"
-		)
+		st.markdown("-----\n### Fecha de colecta\n")
+		
+		c0, c1 = st.columns([1, 1])
 
-		st.text_input(
-			label="Grupo taxonómico",
-			help="Grupo taxonómico que se quiere consultar (e.g., `Asteraceae`).",
-			placeholder="Taxón",
-			value=None,
-			key="taxon"
-		)
+		with c0:
+
+			st.date_input(
+				label="Fecha inicial de colecta",
+				help="Fecha inicial de colecta. Debe ser anterior a la fecha final de colecta.",
+				value=None, #yesterday_date,
+				min_value=datetime.date(1400, 1, 1),
+				max_value="today",
+				key="fecha_0"
+			)
+
+		with c1:
+
+			st.date_input(
+				label="Fecha final de colecta",
+				help="Fecha final de colecta. Debe ser posterior a la fecha inicial de colecta.",
+				value=None, #today_date,
+				min_value=datetime.date(1400, 1, 1),
+				max_value="today",
+				key="fecha_f"
+			)
+
+		st.markdown("-----\n### Táxon\nSi está interesado en buscar registros de un grupo taxonómico, primero digite parte del nombre del taxón en la caja de la izquierda y presione el botón `Buscar táxon`. A continuación los nombres taxonómicos sugeridos aparecerán en la caja de la derecha. Seleccione las opciones que se ajustan a su criterio de búsqueda.")
+
+
+		d0, d1 = st.columns([1, 1])
+
+		with d0:
+
+			st.text_input(
+				label="Grupo taxonómico",
+				help="Grupo taxonómico que se quiere consultar (e.g., `Asteraceae`).",
+				placeholder="Taxón",
+				value=None,
+				key="taxon_pre"
+			)
+
+			st.form_submit_button('Buscar táxon', on_click=buscar_taxon)
+
+
+		with d1:
+
+			st.multiselect(
+				label="Grupo taxonómico sugerido",
+				help="Grupo(s) taxonómico(s) sugeridos presentes en la base de datos.",
+				options=st.session_state.taxon_sug,
+				default=None,
+				key="taxon",
+				accept_new_options=False
+			)
+
+
+		st.markdown("-----\n### Ubicación espacial de las coordenadas\n")
 
 		st.text_input(
 			label="Localidad",
