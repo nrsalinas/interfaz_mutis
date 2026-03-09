@@ -67,7 +67,9 @@ if not "query" in st.session_state: st.session_state.query = None
 if not "colector_posible" in st.session_state: st.session_state.colector_posible = []
 if not "colector_pre" in st.session_state: st.session_state.colector_pre = None
 if not "colectores" in st.session_state: st.session_state.colectores = []
-if not "taxon_sug" in st.session_state: st.session_state.taxon_sug = []
+if not "taxon_pre" in st.session_state: st.session_state.taxon_pre = None
+if not "taxon_posible" in st.session_state: st.session_state.taxon_posible = []
+if not "taxon" in st.session_state: st.session_state.taxa = []
 
 
 @st.dialog("Error")
@@ -104,7 +106,8 @@ def close_db():
 
 
 def validate_search():
-	query = "SELECT * "
+	query = "SELECT * FROM Occurrences LEFT JOIN Identifications ON Identifications.Occurrence = Occurrences.OccurrenceID LEFT JOIN Locations ON Locations.LocationID = Occurrences.Location WHERE "
+	criteria = []
 
 	if len(st.session_state.colectores) > 0:
 
@@ -119,9 +122,49 @@ def validate_search():
 		)
 
 		collstr = ", ".join(nums)
-		query += f"FROM Occurrences WHERE Collector IN ({collstr}) "
+		criteria.append(f"Collector IN ({collstr})")
 
-		error_window(query)
+	if len(st.session_state.taxon) > 0:
+
+		nums = reduce(
+			lambda x,y : x+y, 
+			map(
+				lambda x: re.findall(r"\(ID: (\d+)\)", x), 
+				st.session_state.taxon
+			)
+		)
+
+		taxstr = ", ".join(nums)
+		criteria.append(f"Identifications.Name IN ({taxstr})")
+
+	if st.session_state.no_coleccion:
+
+		if re.search(r"\-", st.session_state.no_coleccion):
+			bits = re.split(r"\-", st.session_state.no_coleccion)
+			criteria.append(f"CollectionNumber >= {bits[0]} AND CollectionNumber <= {bits[1]}")
+
+		else:
+			criteria.append(f"CollectionNumber = {st.session_state.no_coleccion}")
+
+	if st.session_state.fecha_0: 
+		
+		if st.session_state.fecha_f:
+			criteria.append(f"DateInit >= '{st.session_state.fecha_0}' AND DateEnd <= '{st.session_state.fecha_f}'")
+		else:
+			criteria.append(f"DateInit = '{st.session_state.fecha_0}'")
+
+	query += " AND ".join(criteria)
+
+	error_window(query)
+
+
+def buscar_taxon():
+
+	qu = f"SELECT DISTINCT TaxonID, Name FROM Taxa WHERE Name REGEXP '{st.session_state.taxon_pre}' ORDER BY Name"	
+	sugg = pd.read_sql_query(qu, st.session_state.connection)
+	sugg["taxa"] = sugg.Name.apply(str) + " (ID: " + sugg.TaxonID.apply(str) + ")"
+	st.session_state.taxon_posible = sugg.taxa.tolist()
+
 
 def buscar_colector():
 
@@ -133,16 +176,6 @@ def buscar_colector():
 	sugg["name"] = sugg.LastName.apply(str) + ", " + sugg.FirstName.apply(str) + " (ID: " +  sugg.People.apply(str) + ")"
 
 	st.session_state.colector_posible = sugg.name.tolist()
-
-
-def buscar_taxon():
-
-	sugg = pd.read_sql_query(
-		f"SELECT Name FROM Taxa WHERE Name REGEXP '{st.session_state.taxon_pre}'",
-		st.session_state.connection
-	)
-
-	st.session_state.taxon_sug = sugg.Name.tolist()
 
 
 with st.form(
@@ -279,7 +312,7 @@ if st.session_state.consulta == "Búsqueda":
 
 			st.date_input(
 				label="Fecha final de colecta",
-				help="Fecha final de colecta. Debe ser posterior a la fecha inicial de colecta.",
+				help="Fecha final de colecta. Debe ser igual o posterior a la fecha inicial de colecta.",
 				value=None, #today_date,
 				min_value=datetime.date(1400, 1, 1),
 				max_value="today",
@@ -310,37 +343,39 @@ if st.session_state.consulta == "Búsqueda":
 			st.multiselect(
 				label="Grupo taxonómico sugerido",
 				help="Grupo(s) taxonómico(s) sugeridos presentes en la base de datos.",
-				options=st.session_state.taxon_sug,
+				options=st.session_state.taxon_posible,
 				default=None,
 				key="taxon",
 				accept_new_options=False
 			)
 
+		
+#		st.markdown("-----\n### Ubicación espacial de las coordenadas\n")
+#
+#		st.text_input(
+#			label="Localidad",
+#			help="Localidad de Bogotá de la cual se quiere consultar registros.",
+#			placeholder="Localidad",
+#			value=None,
+#			key="localidad"
+#		)
+#
+#		st.text_input(
+#			label="Sitio de colección",
+#			help="Palabra(s) claves(s) de la ubicación geográfica donde se registraron las muestras.",
+#			placeholder="Sitio",
+#			value=None,
+#			key="sitio"
+#		)
+#
+#		st.file_uploader(
+#			label="Polígono",
+#			help="Shapefile delimitando un polígono de búsqueda.",
+#			key="shape",
+#			type="shp",
+#		)
 
-		st.markdown("-----\n### Ubicación espacial de las coordenadas\n")
-
-		st.text_input(
-			label="Localidad",
-			help="Localidad de Bogotá de la cual se quiere consultar registros.",
-			placeholder="Localidad",
-			value=None,
-			key="localidad"
-		)
-
-		st.text_input(
-			label="Sitio de colección",
-			help="Palabra(s) claves(s) de la ubicación geográfica donde se registraron las muestras.",
-			placeholder="Sitio",
-			value=None,
-			key="sitio"
-		)
-
-		st.file_uploader(
-			label="Polígono",
-			help="Shapefile delimitando un polígono de búsqueda.",
-			key="shape",
-			type="shp",
-		)
+		st.markdown("\n-----\n")
 
 		st.form_submit_button(
 			'Buscar', 
