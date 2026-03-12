@@ -105,8 +105,108 @@ def close_db():
 		st.session_state.connection = None
 
 
+def occurrence_pool(identification_ids):
+	ids_str = ", ".join([str(i) for i in identification_ids])
+	query = f"SELECT OccurrenceID FROM Occurrrences LEFT JOIN Identifications ON Identifications.Occurrence = Occurrences.OccurrenceID WHERE IdentificationID IN ({ids_str})"
+	occ_ids = pd.read_sql_query(query, st.session_state.connection).OccurrenceID.tolist()
+	return occ_ids
+
+def set_taxon_rank(rec_table : pd.DataFrame):
+	rec_table["taxonRank"] = None
+	rec_table['genus'] = None
+	rec_table['specificEpithet'] = None
+	rec_table['infraspecificEpithet'] = None
+	rec_table.loc[rec_table.scientificName.str.contains(' var. ', regex=False), 'taxonRank'] = 'variety'
+	rec_table.loc[rec_table.scientificName.str.contains(' subsp. ', regex=False), 'taxonRank'] = 'subspecies'
+	rec_table.loc[rec_table.scientificName.str.contains(' fo?\\. ', regex=True), 'taxonRank'] = 'forma'
+
+	if rec_table.loc[rec_table.scientificName.str.contains('ales$', na=False)
+		].shape[0] > 0:
+
+		rec_table.loc[
+			rec_table.scientificName.str.contains('ales$', na=False),
+			'taxonRank'] = 'order'
+		
+	if rec_table.loc[rec_table.scientificName.str.contains('aceae$', na=False)
+		].shape[0] > 0:
+
+		rec_table.loc[
+			rec_table.scientificName.str.contains('aceae$', na=False),
+			'taxonRank'] = 'family'
+		
+	if rec_table.loc[rec_table.scientificName.str.contains('×', na=False)
+		].shape[0] > 0:
+
+		rec_table.loc[
+			rec_table.scientificName.str.contains('×', na=False),
+			'taxonRank'] = 'hybrid'
+		
+	rec_table.loc[
+		rec_table.taxonRank.isnull() &
+		rec_table.scientificName.str.contains('[\\w\\-]\\s+[\\w\\-]', regex=True),
+		'taxonRank'] = 'species'
+
+	# everything else is ided to genus level
+	if rec_table.loc[rec_table.taxonRank.isnull()].shape[0] > 0:
+		rec_table.loc[rec_table.taxonRank.isnull(), 'taxonRank'] = 'genus'
+
+	rec_table.loc[rec_table.taxonRank == 'species', 'specificEpithet'
+		] = rec_table.loc[rec_table.taxonRank == 'species', 'scientificName'
+		].str.extract('\\s+([\\w\\-]+)$')[0]
+
+	rec_table.loc[rec_table.taxonRank.isin(['variety', 'forma', 'subspecies']), 'specificEpithet'
+		] = rec_table.loc[rec_table.taxonRank.isin(['variety', 'forma', 'subspecies']), 'scientificName'
+		].str.extract('\\s+([\\w\\-]+)\\s+[\\w\\-]+$')
+
+	rec_table.loc[rec_table.taxonRank.isin(['variety', 'forma', 'subspecies']), 'infraspecificEpithet'
+		] = rec_table.loc[rec_table.taxonRank.isin(['variety', 'forma', 'subspecies']), 'scientificName'
+		].str.extract('\\s+[\\w\\-]+\\s+([\\w\\-]+)$')
+
+	rec_table.loc[rec_table.taxonRank == 'genus', 'genus'
+		] = rec_table.loc[rec_table.taxonRank == 'genus', 'scientificName']
+
+	rec_table.loc[
+		rec_table.taxonRank.isin(['species', 'hybrid', 'variety', 'forma', 'subspecies']),
+		'genus'
+		] = rec_table.loc[
+		rec_table.taxonRank.isin(['species', 'hybrid', 'variety', 'forma', 'subspecies'])
+		].scientificName.str.replace('×', ' '
+		).str.replace('^\\s+|\\s+$', '', regex=True
+		).str.replace('\\s+', ' ', regex=True
+		).str.split('\\s+', expand=True
+		)[0]
+
+#TODO
+#TODO Ajustar la siguiente función
+#TODO
+#	def get_family(row):
+#		if row.taxonRank == 'family':
+#			return row.scientificName
+#		elif row.genus:
+#			thpapa = tax.loc[tax.Name == row.genus, 'Parent'].item()
+#			return tax.loc[tax.TaxonID == thpapa, 'Name'].item()
+#		else:
+#			return None
+
+#	rec_table['family'] = rec_table.apply(get_family, axis=1)
+
+	return rec_table
+
+
+
+
+
+
+
 def validate_search():
-	query = "SELECT * FROM Occurrences LEFT JOIN Identifications ON Identifications.Occurrence = Occurrences.OccurrenceID LEFT JOIN Locations ON Locations.LocationID = Occurrences.Location WHERE "
+	query = "SELECT Specimens.SpecimenCode AS 'catalogNumber', Occurrences.Type AS 'basisOfRecord', Specimens.Institution AS 'institutionCode', Sources.Author AS 'refAuthor', Sources.Name AS 'refName', Sources.Year AS 'refYear', Occurrences.CollectorVerbatim AS 'recordedBy', Occurrences.CollectionNumberVerbatim AS 'recordNumber', Occurrences.DateInit AS 'eventDate', Taxa.Name AS 'scientificName', Taxa.Author AS 'scientificNameAuthorship', Identifications.IdentifiedByVerbatim AS 'identifiedBy', Identifications.Date AS 'dateIdentified', Locations.Country AS 'country', Locations.Admin01 AS 'stateProvince', Locations.Admin02 AS 'municipality', Locations.Admin03 as 'county', Locations.Name AS 'localityVerbatim', Geocodings.InterpretedLat AS 'decimalLatitude', Geocodings.InterpretedLon AS 'decimalLongitude', Locations.ElevationMin AS 'minimumElevationInMeters', Locations.ElevationMax AS 'maximumElevationInMeters' FROM Occurrences " \
+		+ "LEFT JOIN Sources ON SourceID=Occurrences.Reference " \
+		+ "LEFT JOIN Identifications ON Identifications.Occurrence=OccurrenceID " \
+		+ "LEFT JOIN Taxa ON TaxonID=Identifications.Name " \
+		+ "LEFT JOIN Specimens ON Specimens.Occurrence=OccurrenceID " \
+		+ "LEFT JOIN Locations ON LocationID=Occurrences.Location " \
+		+ "LEFT JOIN Geocodings ON LocationID=Geocodings.Location WHERE " 
+
 	criteria = []
 
 	if len(st.session_state.colectores) > 0:
@@ -125,8 +225,9 @@ def validate_search():
 		criteria.append(f"Collector IN ({collstr})")
 
 	if len(st.session_state.taxon) > 0:
+		nums = []
 
-		nums = reduce(
+		taxids = reduce(
 			lambda x,y : x+y, 
 			map(
 				lambda x: re.findall(r"\(ID: (\d+)\)", x), 
@@ -134,7 +235,10 @@ def validate_search():
 			)
 		)
 
-		taxstr = ", ".join(nums)
+		for ti in taxids:
+			nums += get_children_taxa(int(ti))
+		
+		taxstr = ", ".join(set([str(i) for i in nums]))
 		criteria.append(f"Identifications.Name IN ({taxstr})")
 
 	if st.session_state.no_coleccion:
@@ -155,15 +259,49 @@ def validate_search():
 
 	query += " AND ".join(criteria)
 
-	error_window(query)
+	#error_window(query)
+	recs = pd.read_sql(query, st.session_state.connection)
 
+
+def get_children_taxa(taxid):
+
+	qu = f"SELECT DISTINCT TaxonID FROM Taxa WHERE Parent = {taxid}"
+	thchildren = pd.read_sql_query(qu, st.session_state.connection)
+	
+	if thchildren.shape[0] > 0:
+		acc = []
+	
+		for thid in thchildren.TaxonID:
+			acc += get_children_taxa(thid)
+	
+		return acc
+	
+	else:
+		return [taxid]
+	
 
 def buscar_taxon():
+#	target_ids = []
+	qu = f"SELECT DISTINCT TaxonID, Name FROM Taxa WHERE Name REGEXP '{st.session_state.taxon_pre}'"	
+	sugg1 = pd.read_sql_query(qu, st.session_state.connection)
+	sugg1["taxa"] = sugg1.Name.apply(str) + " (ID: " + sugg1.TaxonID.apply(str) + ")"
+	st.session_state.taxon_posible = sugg1.taxa.tolist()
 
-	qu = f"SELECT DISTINCT TaxonID, Name FROM Taxa WHERE Name REGEXP '{st.session_state.taxon_pre}' ORDER BY Name"	
-	sugg = pd.read_sql_query(qu, st.session_state.connection)
-	sugg["taxa"] = sugg.Name.apply(str) + " (ID: " + sugg.TaxonID.apply(str) + ")"
-	st.session_state.taxon_posible = sugg.taxa.tolist()
+#	if sugg1.shape[0] > 0:
+#		target_ids = sugg1.TaxonID.tolist()
+#
+#		for thid in sugg1.TaxonID.tolist():
+#			target_ids += get_children_taxa(thid)
+#
+#	#error_window(target_ids)
+#	concatids = ', '.join([str(x) for x in target_ids])
+#	qu = f"SELECT DISTINCT TaxonID, Name FROM Taxa WHERE TaxonID IN ({concatids})"
+#	sugg2 = pd.read_sql_query(qu, st.session_state.connection)
+#	sugg = pd.concat([sugg1, sugg2])
+#
+#	sugg["taxa"] = sugg.Name.apply(str) + " (ID: " + sugg.TaxonID.apply(str) + ")"
+#	st.session_state.taxon_posible = sugg.taxa.tolist()
+
 
 
 def buscar_colector():
@@ -177,6 +315,10 @@ def buscar_colector():
 
 	st.session_state.colector_posible = sugg.name.tolist()
 
+
+################################################################################
+###						Formato principal
+################################################################################
 
 with st.form(
 	"Authentication",
