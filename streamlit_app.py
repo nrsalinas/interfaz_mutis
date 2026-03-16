@@ -28,7 +28,7 @@ import datetime
 import pytz
 import streamlit as st
 import pandas as pd
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine # type: ignore
 
 today = datetime.datetime.now()
 yesterday = today - datetime.timedelta(1)
@@ -111,7 +111,19 @@ def occurrence_pool(identification_ids):
 	occ_ids = pd.read_sql_query(query, st.session_state.connection).OccurrenceID.tolist()
 	return occ_ids
 
-def set_taxon_rank(rec_table : pd.DataFrame):
+
+def get_family(row):
+	tax = pd.read_sql_table("Taxa", st.session_state.connection)
+	if row.taxonRank == 'family':
+		return row.scientificName
+	elif row.genus:
+		thpapa = tax.loc[tax.Name == row.genus, 'Parent'].item()
+		return tax.loc[tax.TaxonID == thpapa, 'Name'].item()
+	else:
+		return None
+		
+
+def set_taxonomic_fields(rec_table : pd.DataFrame):
 	rec_table["taxonRank"] = None
 	rec_table['genus'] = None
 	rec_table['specificEpithet'] = None
@@ -176,26 +188,55 @@ def set_taxon_rank(rec_table : pd.DataFrame):
 		).str.split('\\s+', expand=True
 		)[0]
 
-#TODO
-#TODO Ajustar la siguiente función
-#TODO
-#	def get_family(row):
-#		if row.taxonRank == 'family':
-#			return row.scientificName
-#		elif row.genus:
-#			thpapa = tax.loc[tax.Name == row.genus, 'Parent'].item()
-#			return tax.loc[tax.TaxonID == thpapa, 'Name'].item()
-#		else:
-#			return None
-
-#	rec_table['family'] = rec_table.apply(get_family, axis=1)
+	rec_table['family'] = rec_table.apply(get_family, axis=1)
 
 	return rec_table
 
 
+def literature_fields(rec_table : pd.DataFrame):
 
+	authlist = ', '.join([
+		str(x) for x in rec_table.groupby('refAuthor'
+			).size(
+			).reset_index(
+			).refAuthor.tolist()
+	])
 
+	authors = pd.read_sql(
+		"SELECT People, LastName, `Order` FROM PeoplePersons " \
+		+ "LEFT JOIN Persons ON PeoplePersons.Person=Persons.PersonID " \
+		+ f"WHERE PeoplePersons.People IN ({authlist})",
+		st.session_state.connection)
 
+	authors = authors.sort_values(['People', 'Order'])
+	cita = authors.groupby('People').size().reset_index()
+	cita['author'] = None
+
+	for a in cita.People:
+		#print(f"{a=}")
+		l = authors.loc[authors.People == a, 'LastName'].values.tolist()
+		l = [m for m in l if pd.notnull(m)]
+		#print(f"{l=}")
+		if len(l) == 1:
+			cita.loc[cita.People == a, 'author'] = l[0]
+		elif len(l) == 2:
+			cita.loc[cita.People == a, 'author'] = l[0] + ' & ' + l[1]
+		elif len(l) > 2:
+			acc = ', '.join(l[:-1]) + ' & ' + l[-1]
+			cita.loc[cita.People == a, 'author'] = acc
+		
+
+	rec_table = rec_table.merge(cita, how='left', left_on='refAuthor', right_on='People')
+
+	def get_citation(row):
+		out = None
+		if row.refYear and row.author and row.refName:
+			out = f"{row.author}. {int(row.refYear)}. {row.refName}"
+		return out
+
+	rec_table['bibliographicCitation'] = rec_table.apply(get_citation, axis=1) 
+
+	return rec_table
 
 
 def validate_search():
@@ -261,6 +302,8 @@ def validate_search():
 
 	#error_window(query)
 	recs = pd.read_sql(query, st.session_state.connection)
+	recs = set_taxonomic_fields(recs)
+	recs = literature_fields(recs)
 
 
 def get_children_taxa(taxid):
