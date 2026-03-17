@@ -70,6 +70,8 @@ if not "colectores" in st.session_state: st.session_state.colectores = []
 if not "taxon_pre" in st.session_state: st.session_state.taxon_pre = None
 if not "taxon_posible" in st.session_state: st.session_state.taxon_posible = []
 if not "taxon" in st.session_state: st.session_state.taxa = []
+if not "download" in st.session_state: st.session_state.download = False
+if not "dwc" in st.session_state: st.session_state.dwc = None
 
 
 @st.dialog("Error")
@@ -112,8 +114,8 @@ def occurrence_pool(identification_ids):
 	return occ_ids
 
 
-def get_family(row):
-	tax = pd.read_sql_table("Taxa", st.session_state.connection)
+def get_family(row, tax):
+	#tax = pd.read_sql_table("Taxa", st.session_state.connection)
 	if row.taxonRank == 'family':
 		return row.scientificName
 	elif row.genus:
@@ -188,7 +190,8 @@ def set_taxonomic_fields(rec_table : pd.DataFrame):
 		).str.split('\\s+', expand=True
 		)[0]
 
-	rec_table['family'] = rec_table.apply(get_family, axis=1)
+	tax = pd.read_sql_table("Taxa", st.session_state.connection)
+	rec_table['family'] = rec_table.apply(lambda x: get_family(x, tax), axis=1)
 
 	return rec_table
 
@@ -299,11 +302,12 @@ def validate_search():
 			criteria.append(f"DateInit = '{st.session_state.fecha_0}'")
 
 	query += " AND ".join(criteria)
-
-	#error_window(query)
 	recs = pd.read_sql(query, st.session_state.connection)
 	recs = set_taxonomic_fields(recs)
 	recs = literature_fields(recs)
+	#error_window(f"{recs.shape=}")
+	st.session_state.dwc = recs.to_csv()
+	st.session_state.download = True
 
 
 def get_children_taxa(taxid):
@@ -567,8 +571,14 @@ if st.session_state.consulta == "Búsqueda":
 			on_click=validate_search
 		)
 
-		if st.session_state.query:
-			st.markdown(st.session_state.query)
+	if st.session_state.download:
+		st.download_button(
+			"Descarga DwC",
+			data=st.session_state.dwc,
+			file_name="consulta_DwC_Mutis.csv",
+			mime="text/csv",
+		)			
+
 exit()
 
 
