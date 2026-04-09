@@ -416,8 +416,8 @@ if st.session_state.connection:
 		st.selectbox(
 			"Tipo de consulta", 
 			[
-				#"Actualización",
-				#"Inserción", 
+				"Actualización/inserción en masa",
+				#"Actualización/inserción por registro individual",
 				"Búsqueda",
 			],
 			index=0,
