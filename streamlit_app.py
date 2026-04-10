@@ -72,7 +72,8 @@ if not "taxon_posible" in st.session_state: st.session_state.taxon_posible = []
 if not "taxon" in st.session_state: st.session_state.taxa = []
 if not "download" in st.session_state: st.session_state.download = False
 if not "dwc" in st.session_state: st.session_state.dwc = None
-
+if not "indata" in st.session_state: st.session_state.indata = None
+if not "upcsv" in st.session_state: st.session_state.upcsv = None
 
 @st.dialog("Error")
 def error_window(message):
@@ -363,6 +364,45 @@ def buscar_colector():
 	st.session_state.colector_posible = sugg.name.tolist()
 
 
+def process_collectors(dwc_frame):
+
+	if "recordedBy" in dwc_frame.columns:
+		dwc_frame["recordedByAlt"] = dwc_frame.recordedBy.str.replace(
+			r"[\.,]", "", regex=True
+		)
+		dwc_frame["recordedByAlt"] = dwc_frame.recordedByAlt.str.replace(
+			r"\s+", " ", regex=True
+		)
+		dwc_frame["recordedByAlt"] = dwc_frame.recordedByAlt.str.lower()
+		indb = pd.read_sql_query(
+			f"SELECT DISTINCT NameVerbatim FROM Persons",
+			st.session_state.connection
+		)
+		indb["NameVerbatimAlt"] = indb.NameVerbatim.str.replace(
+			r"[\.,]", "", regex=True
+		)
+		indb["NameVerbatimAlt"] = indb.NameVerbatimAlt.str.replace(
+			r"\s+", " ", regex=True
+		)
+		indb["NameVerbatimAlt"] = indb.NameVerbatimAlt.str.lower()
+
+		st.write(indb.head())
+		st.write(dwc_frame.head())
+
+
+def execute_update():
+
+	if st.session_state.upcsv:
+		st.session_state.indata = pd.read_csv(st.session_state.upcsv)
+	else:
+		error_window("Cargue el pinche archivo de nuevo perro!!!!")
+	
+	if isinstance(st.session_state.indata, pd.DataFrame):
+		process_collectors(st.session_state.indata)
+
+	else:
+		error_window("El archivo de entrada no pudo ser leido como una tabla. Verifique que se ajuste al formato csv estricto.")
+
 ################################################################################
 ###						Formato principal
 ################################################################################
@@ -416,8 +456,8 @@ if st.session_state.connection:
 		st.selectbox(
 			"Tipo de consulta", 
 			[
-				"Actualización/inserción en masa",
-				#"Actualización/inserción por registro individual",
+				"Actualización múltiple",
+				#"Actualización individual",
 				"Búsqueda",
 			],
 			index=0,
@@ -578,6 +618,27 @@ if st.session_state.consulta == "Búsqueda":
 			file_name="consulta_DwC_Mutis.csv",
 			mime="text/csv",
 		)			
+
+elif st.session_state.consulta == "Actualización múltiple":
+	mult = st.empty()
+
+	with mult.form("Formato de actualización múltiple"):
+
+		st.markdown("# Actualización de múltiples registros\nEn la siguiente forma puede cargar un archivo DarwinCore para actualizar o insertar varios registros en la base de datos Mutis. Tenga en cuenta que el archivo debe seguir un formato csv estricto: **_comas como separadores de campo y puntos como indicador de decimales_**. \n\nInicialmente, la aplicación verificará que si los colectores ya fueron ingresados en la base de datos, para lo cual los nombres digitados en la columna *recordedBy* deben estar homogenizados, siguiendo el formato ```apellido(s), iniciales de los nombres``` (p.e., ```García-Barriga, H.```)")
+
+		st.file_uploader(
+			"Seleccione un archivo perrito", 
+			type='csv',
+			accept_multiple_files = False,
+			key='upcsv',
+			help = "El archivo DarwinCore debe tener formato csv estricto",
+			#on_change=process_infile,
+		)
+
+		st.form_submit_button(
+			"Procesar actualización",
+			on_click=execute_update,
+		)
 
 exit()
 
