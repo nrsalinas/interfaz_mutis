@@ -26,6 +26,9 @@ import re
 from functools import reduce
 import datetime
 import pytz
+from unidecode import unidecode
+
+from rapidfuzz import fuzz,process,distance
 import streamlit as st
 import pandas as pd
 from sqlalchemy import create_engine # type: ignore
@@ -74,6 +77,7 @@ if not "download" in st.session_state: st.session_state.download = False
 if not "dwc" in st.session_state: st.session_state.dwc = None
 if not "indata" in st.session_state: st.session_state.indata = None
 if not "upcsv" in st.session_state: st.session_state.upcsv = None
+if not "coll_map" in st.session_state: st.session_state.coll_map = None
 
 @st.dialog("Error")
 def error_window(message):
@@ -335,22 +339,6 @@ def buscar_taxon():
 	sugg1["taxa"] = sugg1.Name.apply(str) + " (ID: " + sugg1.TaxonID.apply(str) + ")"
 	st.session_state.taxon_posible = sugg1.taxa.tolist()
 
-#	if sugg1.shape[0] > 0:
-#		target_ids = sugg1.TaxonID.tolist()
-#
-#		for thid in sugg1.TaxonID.tolist():
-#			target_ids += get_children_taxa(thid)
-#
-#	#error_window(target_ids)
-#	concatids = ', '.join([str(x) for x in target_ids])
-#	qu = f"SELECT DISTINCT TaxonID, Name FROM Taxa WHERE TaxonID IN ({concatids})"
-#	sugg2 = pd.read_sql_query(qu, st.session_state.connection)
-#	sugg = pd.concat([sugg1, sugg2])
-#
-#	sugg["taxa"] = sugg.Name.apply(str) + " (ID: " + sugg.TaxonID.apply(str) + ")"
-#	st.session_state.taxon_posible = sugg.taxa.tolist()
-
-
 
 def buscar_colector():
 
@@ -364,16 +352,10 @@ def buscar_colector():
 	st.session_state.colector_posible = sugg.name.tolist()
 
 
-def process_collectors(dwc_frame):
+def process_collectors():
 
-	if "recordedBy" in dwc_frame.columns:
-		dwc_frame["recordedByAlt"] = dwc_frame.recordedBy.str.replace(
-			r"[\.,]", "", regex=True
-		)
-		dwc_frame["recordedByAlt"] = dwc_frame.recordedByAlt.str.replace(
-			r"\s+", " ", regex=True
-		)
-		dwc_frame["recordedByAlt"] = dwc_frame.recordedByAlt.str.lower()
+	if "recordedBy" in st.session_state.indata.columns:
+
 		indb = pd.read_sql_query(
 			f"SELECT DISTINCT NameVerbatim FROM Persons",
 			st.session_state.connection
@@ -382,23 +364,61 @@ def process_collectors(dwc_frame):
 			r"[\.,]", "", regex=True
 		)
 		indb["NameVerbatimAlt"] = indb.NameVerbatimAlt.str.replace(
-			r"\s+", " ", regex=True
+			r"\s+", "", regex=True
 		)
 		indb["NameVerbatimAlt"] = indb.NameVerbatimAlt.str.lower()
+		indb["NameVerbatimAlt"] = indb.NameVerbatimAlt.apply(unidecode)
 
-		st.write(indb.head())
-		st.write(dwc_frame.head())
+		st.session_state.indata["recordedBy"
+			] = st.session_state.indata.recordedBy.str.replace(r"\s+", " ", regex=True)
+		st.session_state.indata["recordedBy"
+			] = st.session_state.indata.recordedBy.str.replace(r"\.\s+", ".", regex=True)
+		st.session_state.indata["recordedBy"
+			] = st.session_state.indata.recordedBy.str.replace(r"^\s+", "", regex=True)
+		st.session_state.indata["recordedBy"
+			] = st.session_state.indata.recordedBy.str.replace(r"\s+$", "", regex=True)
+
+		st.session_state.coll_map = {
+				i:{
+					"recordedByAlt": None, 
+					"candidates": None, 
+					} for i in sorted(set(st.session_state.indata.recordedBy.tolist()))
+			}
+		
+		for thcoll in st.session_state.coll_map:
+
+			st.session_state[f"coll_sel_{thcoll}"] = None
+			st.session_state.coll_map[thcoll]["recordedByAlt"] = re.sub(r"[\.,]", "", thcoll)
+			st.session_state.coll_map[thcoll]["recordedByAlt"] = re.sub(
+				r"\s+", "", st.session_state.coll_map[thcoll]["recordedByAlt"])
+			st.session_state.coll_map[thcoll]["recordedByAlt"
+				] = st.session_state.coll_map[thcoll]["recordedByAlt"].lower()
+			st.session_state.coll_map[thcoll]["recordedByAlt"
+				] = unidecode(st.session_state.coll_map[thcoll]["recordedByAlt"])
+			res = process.extract(
+				st.session_state.coll_map[thcoll]["recordedByAlt"], 
+				indb.NameVerbatimAlt.tolist(), 
+				scorer=distance.Levenshtein.distance, 
+				limit=5
+			)
+			thidx = [i[2] for i in res]
+			st.session_state.coll_map[thcoll]["candidates"] = [indb.NameVerbatim.tolist()[m] for m in thidx]
+			st.session_state.coll_map[thcoll]["candidates"].append("Nuevo colector para ingresar")
+
+	return None		
 
 
 def execute_update():
 
 	if st.session_state.upcsv:
 		st.session_state.indata = pd.read_csv(st.session_state.upcsv)
+
 	else:
 		error_window("Cargue el pinche archivo de nuevo perro!!!!")
 	
 	if isinstance(st.session_state.indata, pd.DataFrame):
-		process_collectors(st.session_state.indata)
+		process_collectors()
+		#st.write(st.session_state.indata[["recordedBy", "candidates"]].head())
 
 	else:
 		error_window("El archivo de entrada no pudo ser leido como una tabla. Verifique que se ajuste al formato csv estricto.")
@@ -639,6 +659,24 @@ elif st.session_state.consulta == "Actualización múltiple":
 			"Procesar actualización",
 			on_click=execute_update,
 		)
+
+		if isinstance(st.session_state.indata, pd.DataFrame) and \
+			isinstance(st.session_state.coll_map, dict) and \
+			len(st.session_state.coll_map) > 0:
+
+			for thcoll in st.session_state.coll_map.keys():
+				
+				st.write("-----")
+				st.write(f"Colector original: {thcoll}\n\nColectores propuestos:")				
+				st.selectbox(
+					"Colectores en Mutis",
+					st.session_state.coll_map[thcoll]["candidates"],
+					index=0,
+					placeholder="Seleccione el colector apropiado",
+					key=f"coll_sel_{thcoll}",
+					#key=st.session_state.coll_selections[thcoll]
+				)
+
 
 exit()
 
