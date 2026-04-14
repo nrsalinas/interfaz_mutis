@@ -408,6 +408,19 @@ def process_collectors():
 	return None		
 
 
+def update_collectors():
+
+	for thcoll in st.session_state.coll_map.keys():
+
+		if st.session_state[f"coll_sel_{thcoll}"] == "Nuevo colector para ingresar":
+			pass
+			# Insert st.session_state[f"coll_sel_{thcoll}"] in db
+
+		else:
+			pass
+			# Replace selected collector in st.session_state.indata
+
+
 def execute_update():
 
 	if st.session_state.upcsv:
@@ -656,7 +669,7 @@ elif st.session_state.consulta == "Actualización múltiple":
 		)
 
 		st.form_submit_button(
-			"Procesar actualización",
+			"Procesar colectores",
 			on_click=execute_update,
 		)
 
@@ -677,6 +690,10 @@ elif st.session_state.consulta == "Actualización múltiple":
 					#key=st.session_state.coll_selections[thcoll]
 				)
 
+			st.form_submit_button(
+				"Enviar selección de colectores",
+				on_click=update_collectors
+			)
 
 exit()
 
