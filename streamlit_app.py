@@ -31,7 +31,7 @@ from unidecode import unidecode
 from rapidfuzz import fuzz,process,distance
 import streamlit as st
 import pandas as pd
-from sqlalchemy import create_engine # type: ignore
+from sqlalchemy import create_engine, text # type: ignore
 
 today = datetime.datetime.now()
 yesterday = today - datetime.timedelta(1)
@@ -311,7 +311,18 @@ def validate_search():
 	recs = set_taxonomic_fields(recs)
 	recs = literature_fields(recs)
 	#error_window(f"{recs.shape=}")
-	st.session_state.dwc = recs.to_csv()
+	recs = recs[
+		['catalogNumber', 'basisOfRecord', 'institutionCode',
+		'bibliographicCitation',
+		'recordedBy', 'recordNumber', 'eventDate', 
+		'taxonRank', 'scientificName', 'scientificNameAuthorship', 
+		'family', 'genus', 'specificEpithet', 'infraspecificEpithet',
+		'identifiedBy', 'dateIdentified', 
+		'country', 'stateProvince', 'municipality', 'county', 'localityVerbatim',
+		'decimalLatitude', 'decimalLongitude', 
+		'minimumElevationInMeters', 'maximumElevationInMeters']
+	]
+	st.session_state.dwc = recs.to_csv(index=False)
 	st.session_state.download = True
 
 
@@ -410,15 +421,27 @@ def process_collectors():
 
 def update_collectors():
 
+	insert_sta = "INSERT INTO People (NameVerbatim) VALUES ("
+	insert_bits = []
 	for thcoll in st.session_state.coll_map.keys():
 
 		if st.session_state[f"coll_sel_{thcoll}"] == "Nuevo colector para ingresar":
-			pass
 			# Insert st.session_state[f"coll_sel_{thcoll}"] in db
+			th = st.session_state[f"coll_sel_{thcoll}"]
+			insert_bits.append(f"('{th}')")
+
 
 		else:
-			pass
 			# Replace selected collector in st.session_state.indata
+			st.session_state.indata.loc[
+				st.session_state.indata.recordedBy == thcoll,
+				"recordedBy"
+			] = st.session_state[f"coll_sel_{thcoll}"]
+
+	if len(insert_bits) > 0:
+		insert_sta += ", ".join(insert_bits)
+		st.session_state.connection.execute(text(insert_sta))
+		st.session_state.connection.commit()
 
 
 def execute_update():
