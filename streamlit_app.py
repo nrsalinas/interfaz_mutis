@@ -27,6 +27,7 @@ from functools import reduce
 import datetime
 import pytz
 from unidecode import unidecode
+from io import StringIO
 
 from rapidfuzz import fuzz,process,distance
 import streamlit as st
@@ -248,14 +249,19 @@ def literature_fields(rec_table : pd.DataFrame):
 
 
 def validate_search():
-	query = "SELECT Specimens.SpecimenCode AS 'catalogNumber', Occurrences.Type AS 'basisOfRecord', Specimens.Institution AS 'institutionCode', Sources.Author AS 'refAuthor', Sources.Name AS 'refName', Sources.Year AS 'refYear', Occurrences.CollectorVerbatim AS 'recordedBy', Occurrences.CollectionNumberVerbatim AS 'recordNumber', Occurrences.DateInit AS 'eventDate', Taxa.Name AS 'scientificName', Taxa.Author AS 'scientificNameAuthorship', Identifications.IdentifiedByVerbatim AS 'identifiedBy', Identifications.Date AS 'dateIdentified', Locations.Country AS 'country', Locations.Admin01 AS 'stateProvince', Locations.Admin02 AS 'municipality', Locations.Admin03 as 'county', Locations.Name AS 'localityVerbatim', Geocodings.InterpretedLat AS 'decimalLatitude', Geocodings.InterpretedLon AS 'decimalLongitude', Locations.ElevationMin AS 'minimumElevationInMeters', Locations.ElevationMax AS 'maximumElevationInMeters' FROM Occurrences " \
-		+ "LEFT JOIN Sources ON SourceID=Occurrences.Reference " \
-		+ "LEFT JOIN Identifications ON Identifications.Occurrence=OccurrenceID " \
-		+ "LEFT JOIN Taxa ON TaxonID=Identifications.Name " \
-		+ "LEFT JOIN Specimens ON Specimens.Occurrence=OccurrenceID " \
-		+ "LEFT JOIN Locations ON LocationID=Occurrences.Location " \
-		+ "LEFT JOIN Geocodings ON LocationID=Geocodings.Location WHERE " 
+	querybits = ("SELECT OccurrenceID, SpecimenID, Specimens.SpecimenCode AS 'catalogNumber', Occurrences.Type AS 'basisOfRecord', Institutions.Code AS 'institutionCode', Sources.Author AS 'refAuthor', Sources.Name AS 'refName', Sources.Year AS 'refYear', Occurrences.CollectorVerbatim AS 'recordedBy', Occurrences.CollectionNumberVerbatim AS 'recordNumber', Occurrences.DateInit AS 'eventDate', Taxa.Name AS 'scientificName', Taxa.Author AS 'scientificNameAuthorship', Identifications.IdentifiedByVerbatim AS 'identifiedBy', Identifications.Date AS 'dateIdentified', Locations.Country AS 'country', Locations.Admin01 AS 'stateProvince', Locations.Admin02 AS 'municipality', Locations.Admin03 as 'county', Locations.Name AS 'localityVerbatim', Locations.ElevationMin AS 'minimumElevationInMeters', Locations.ElevationMax AS 'maximumElevationInMeters'",
+	", GeocodingID, Geocodings.InterpretedLat AS 'decimalLatitude', Geocodings.InterpretedLon AS 'decimalLongitude'",
+	"FROM Occurrences",
+	"LEFT JOIN Specimens ON Specimens.Occurrence=Occurrences.OccurrenceID",
+	"LEFT JOIN Institutions ON InstitutionID=Specimens.Institution",
+	"LEFT JOIN Sources ON SourceID=Occurrences.Reference",
+	"LEFT JOIN Identifications ON Identifications.Occurrence=OccurrenceID",
+	"LEFT JOIN Taxa ON TaxonID=Identifications.Name",
+	"LEFT JOIN Locations ON LocationID=Occurrences.Location",
+	"LEFT JOIN Geocodings ON LocationID=Geocodings.Location",
+	"WHERE ")  
 
+	query = " ".join(querybits)
 	criteria = []
 
 	if len(st.session_state.colectores) > 0:
@@ -311,8 +317,9 @@ def validate_search():
 	recs = set_taxonomic_fields(recs)
 	recs = literature_fields(recs)
 	#error_window(f"{recs.shape=}")
-	recs = recs[
-		['catalogNumber', 'basisOfRecord', 'institutionCode',
+	recs = recs[[
+		"OccurrenceID", "SpecimenID", "GeocodingID",
+		'catalogNumber', 'basisOfRecord', 'institutionCode',
 		'bibliographicCitation',
 		'recordedBy', 'recordNumber', 'eventDate', 
 		'taxonRank', 'scientificName', 'scientificNameAuthorship', 
@@ -320,8 +327,9 @@ def validate_search():
 		'identifiedBy', 'dateIdentified', 
 		'country', 'stateProvince', 'municipality', 'county', 'localityVerbatim',
 		'decimalLatitude', 'decimalLongitude', 
-		'minimumElevationInMeters', 'maximumElevationInMeters']
-	]
+		'minimumElevationInMeters', 'maximumElevationInMeters'
+		
+	]]
 	st.session_state.dwc = recs.to_csv(index=False)
 	st.session_state.download = True
 
@@ -668,6 +676,10 @@ if st.session_state.consulta == "Búsqueda":
 		)
 
 	if st.session_state.download:
+
+		#if len(re.split(r"\n", st.session_state.dwc)) < 30:
+		st.dataframe(pd.read_csv(StringIO(st.session_state.dwc)))
+
 		st.download_button(
 			"Descarga DwC",
 			data=st.session_state.dwc,
