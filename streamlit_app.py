@@ -17,8 +17,8 @@
 ################################################################################
 
 #TODO###########################################################################
-#TODO
-#TODO 
+#TODO Routine to select latest geocoding per occurrence
+#TODO Include date and time to file name that is downloaded in a search query
 #TODO 
 #TODO###########################################################################
 
@@ -249,17 +249,23 @@ def literature_fields(rec_table : pd.DataFrame):
 
 
 def validate_search():
-	querybits = ("SELECT OccurrenceID, SpecimenID, Specimens.SpecimenCode AS 'catalogNumber', Occurrences.Type AS 'basisOfRecord', Institutions.Code AS 'institutionCode', Sources.Author AS 'refAuthor', Sources.Name AS 'refName', Sources.Year AS 'refYear', Occurrences.CollectorVerbatim AS 'recordedBy', Occurrences.CollectionNumberVerbatim AS 'recordNumber', Occurrences.DateInit AS 'eventDate', Taxa.Name AS 'scientificName', Taxa.Author AS 'scientificNameAuthorship', Identifications.IdentifiedByVerbatim AS 'identifiedBy', Identifications.Date AS 'dateIdentified', Locations.Country AS 'country', Locations.Admin01 AS 'stateProvince', Locations.Admin02 AS 'municipality', Locations.Admin03 as 'county', Locations.Name AS 'localityVerbatim', Locations.ElevationMin AS 'minimumElevationInMeters', Locations.ElevationMax AS 'maximumElevationInMeters'",
-	", GeocodingID, Geocodings.InterpretedLat AS 'decimalLatitude', Geocodings.InterpretedLon AS 'decimalLongitude'",
-	"FROM Occurrences",
-	"LEFT JOIN Specimens ON Specimens.Occurrence=Occurrences.OccurrenceID",
-	"LEFT JOIN Institutions ON InstitutionID=Specimens.Institution",
-	"LEFT JOIN Sources ON SourceID=Occurrences.Reference",
-	"LEFT JOIN Identifications ON Identifications.Occurrence=OccurrenceID",
-	"LEFT JOIN Taxa ON TaxonID=Identifications.Name",
-	"LEFT JOIN Locations ON LocationID=Occurrences.Location",
-	"LEFT JOIN Geocodings ON LocationID=Geocodings.Location",
-	"WHERE ")  
+	
+	#TODO Implement a routine to select the latest geocoding per occurrence. Currently only Geocodings from Geocoder=1 (Maps_2020) are queried.
+	
+	querybits = (
+		"SELECT",
+		"OccurrenceID, SpecimenID, GeocodingID,",
+		"Specimens.SpecimenCode AS 'catalogNumber', Occurrences.Type AS 'basisOfRecord', Institutions.Code AS 'institutionCode', Sources.Author AS 'refAuthor', Sources.Name AS 'refName', Sources.Year AS 'refYear', Occurrences.CollectorVerbatim AS 'recordedBy', Occurrences.CollectionNumberVerbatim AS 'recordNumber', Occurrences.DateInit AS 'eventDate', Taxa.Name AS 'scientificName', Taxa.Author AS 'scientificNameAuthorship', Identifications.IdentifiedByVerbatim AS 'identifiedBy', Identifications.Date AS 'dateIdentified', Locations.Country AS 'country', Locations.Admin01 AS 'stateProvince', Locations.Admin02 AS 'municipality', Locations.Admin03 as 'county', Locations.Name AS 'localityVerbatim', Locations.ElevationMin AS 'minimumElevationInMeters', Locations.ElevationMax AS 'maximumElevationInMeters', Geocodings.InterpretedLat AS 'decimalLatitude', Geocodings.InterpretedLon AS 'decimalLongitude'",
+		"FROM Occurrences",
+		"LEFT JOIN Specimens ON Specimens.Occurrence=Occurrences.OccurrenceID",
+		"LEFT JOIN Institutions ON InstitutionID=Specimens.Institution",
+		"LEFT JOIN Sources ON SourceID=Occurrences.Reference",
+		"LEFT JOIN Identifications ON Identifications.Occurrence=OccurrenceID",
+		"LEFT JOIN Taxa ON TaxonID=Identifications.Name",
+		"LEFT JOIN Locations ON LocationID=Occurrences.Location",
+		"LEFT JOIN Geocodings ON LocationID=Geocodings.Location",
+		"WHERE Geocoder = 1 AND "
+	)
 
 	query = " ".join(querybits)
 	criteria = []
@@ -318,7 +324,7 @@ def validate_search():
 	recs = literature_fields(recs)
 	#error_window(f"{recs.shape=}")
 	recs = recs[[
-		"OccurrenceID", "SpecimenID", "GeocodingID",
+		#"OccurrenceID", "SpecimenID", "GeocodingID",
 		'catalogNumber', 'basisOfRecord', 'institutionCode',
 		'bibliographicCitation',
 		'recordedBy', 'recordNumber', 'eventDate', 
@@ -429,15 +435,19 @@ def process_collectors():
 
 def update_collectors():
 
-	insert_sta = "INSERT INTO People (NameVerbatim) VALUES ("
+	lastpersonid = st.session_state.connection.execute(text("SELECT MAX(PersonID) from Persons")).scalar()
+	lastpersonidori = lastpersonid
+	personids = []
+	lastpeopleid = st.session_state.connection.execute(text("SELECT MAX(PeopleID) from People")).scalar()
+	insert_sta = "INSERT INTO Persons (PersonID, NameVerbatim) VALUES "
 	insert_bits = []
 	for thcoll in st.session_state.coll_map.keys():
 
 		if st.session_state[f"coll_sel_{thcoll}"] == "Nuevo colector para ingresar":
-			# Insert st.session_state[f"coll_sel_{thcoll}"] in db
-			th = st.session_state[f"coll_sel_{thcoll}"]
-			insert_bits.append(f"('{th}')")
-
+			# Insert thcoll in db
+			insert_bits.append(f"({(lastpersonid+1)},'{thcoll}')")
+			lastpersonid += 1
+			personids.append(lastpersonid)
 
 		else:
 			# Replace selected collector in st.session_state.indata
@@ -451,6 +461,23 @@ def update_collectors():
 		st.session_state.connection.execute(text(insert_sta))
 		st.session_state.connection.commit()
 
+		insert_sta_bis_bis = "INSERT INTO People (PeopleID) VALUES "
+		peopleids = [f"{i}" for i in range((lastpeopleid+1), (lastpeopleid+len(personids)+1))]
+		insert_sta_bis_bis += ", ".join([f"({i})" for i in peopleids])	
+		st.session_state.connection.execute(text(insert_sta_bis_bis))
+		st.session_state.connection.commit()
+
+
+		insert_sta_bis = "INSERT INTO PeoplePersons (Person, People, `Order`) VALUES "
+		insert_bits_bis = []
+		for r,l in zip(personids, peopleids):
+			insert_bits_bis.append(f"({r}, {l}, 1)")
+		insert_sta_bis += ", ".join(insert_bits_bis)
+		st.session_state.connection.execute(text(insert_sta_bis))
+		st.session_state.connection.commit()
+
+		#error_window(f"{lastpersonidori=}\n\n{lastpeopleid=}\n\n{insert_sta=}\n\n{insert_sta_bis_bis=}\n\n{insert_sta_bis=}")
+
 
 def execute_update():
 
@@ -458,7 +485,7 @@ def execute_update():
 		st.session_state.indata = pd.read_csv(st.session_state.upcsv)
 
 	else:
-		error_window("Cargue el pinche archivo de nuevo perro!!!!")
+		error_window("Error al leer el archivo csv!!!!")
 	
 	if isinstance(st.session_state.indata, pd.DataFrame):
 		process_collectors()
@@ -677,8 +704,8 @@ if st.session_state.consulta == "Búsqueda":
 
 	if st.session_state.download:
 
-		#if len(re.split(r"\n", st.session_state.dwc)) < 30:
-		st.dataframe(pd.read_csv(StringIO(st.session_state.dwc)))
+		# The following line display the table, intended only for debbuging
+		#st.dataframe(pd.read_csv(StringIO(st.session_state.dwc)))
 
 		st.download_button(
 			"Descarga DwC",
@@ -695,7 +722,7 @@ elif st.session_state.consulta == "Actualización múltiple":
 		st.markdown("# Actualización de múltiples registros\nEn la siguiente forma puede cargar un archivo DarwinCore para actualizar o insertar varios registros en la base de datos Mutis. Tenga en cuenta que el archivo debe seguir un formato csv estricto: **_comas como separadores de campo y puntos como indicador de decimales_**. \n\nInicialmente, la aplicación verificará que si los colectores ya fueron ingresados en la base de datos, para lo cual los nombres digitados en la columna *recordedBy* deben estar homogenizados, siguiendo el formato ```apellido(s), iniciales de los nombres``` (p.e., ```García-Barriga, H.```)")
 
 		st.file_uploader(
-			"Seleccione un archivo perrito", 
+			"Seleccione un archivo", 
 			type='csv',
 			accept_multiple_files = False,
 			key='upcsv',
