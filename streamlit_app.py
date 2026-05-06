@@ -489,7 +489,7 @@ def execute_update():
 	
 	if isinstance(st.session_state.indata, pd.DataFrame):
 		process_collectors()
-		#st.write(st.session_state.indata[["recordedBy", "candidates"]].head())
+		
 
 	else:
 		error_window("El archivo de entrada no pudo ser leido como una tabla. Verifique que se ajuste al formato csv estricto.")
