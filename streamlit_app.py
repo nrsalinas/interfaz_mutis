@@ -204,46 +204,49 @@ def set_taxonomic_fields(rec_table : pd.DataFrame):
 
 def literature_fields(rec_table : pd.DataFrame):
 
-	authlist = ', '.join([
-		str(x) for x in rec_table.groupby('refAuthor'
-			).size(
-			).reset_index(
-			).refAuthor.tolist()
-	])
-
-	authors = pd.read_sql(
-		"SELECT People, LastName, `Order` FROM PeoplePersons " \
-		+ "LEFT JOIN Persons ON PeoplePersons.Person=Persons.PersonID " \
-		+ f"WHERE PeoplePersons.People IN ({authlist})",
-		st.session_state.connection)
-
-	authors = authors.sort_values(['People', 'Order'])
-	cita = authors.groupby('People').size().reset_index()
-	cita['author'] = None
-
-	for a in cita.People:
-		#print(f"{a=}")
-		l = authors.loc[authors.People == a, 'LastName'].values.tolist()
-		l = [m for m in l if pd.notnull(m)]
-		#print(f"{l=}")
-		if len(l) == 1:
-			cita.loc[cita.People == a, 'author'] = l[0]
-		elif len(l) == 2:
-			cita.loc[cita.People == a, 'author'] = l[0] + ' & ' + l[1]
-		elif len(l) > 2:
-			acc = ', '.join(l[:-1]) + ' & ' + l[-1]
-			cita.loc[cita.People == a, 'author'] = acc
-		
-
-	rec_table = rec_table.merge(cita, how='left', left_on='refAuthor', right_on='People')
-
 	def get_citation(row):
 		out = None
 		if row.refYear and row.author and row.refName:
 			out = f"{row.author}. {int(row.refYear)}. {row.refName}"
 		return out
 
-	rec_table['bibliographicCitation'] = rec_table.apply(get_citation, axis=1) 
+	authprelist = rec_table.groupby('refAuthor'
+			).size(
+			).reset_index(
+			).refAuthor.tolist(
+	)
+	#error_window(f"{authprelist=}")
+	
+	if len(authprelist) > 0:
+
+		authlist = ', '.join([str(x) for x in authprelist])
+		authors = pd.read_sql(
+			"SELECT People, LastName, `Order` FROM PeoplePersons " \
+			+ "LEFT JOIN Persons ON PeoplePersons.Person=Persons.PersonID " \
+			+ f"WHERE PeoplePersons.People IN ({authlist})",
+			st.session_state.connection)
+		authors = authors.sort_values(['People', 'Order'])
+		cita = authors.groupby('People').size().reset_index()
+		cita['author'] = None
+
+		for a in cita.People:
+			#print(f"{a=}")
+			l = authors.loc[authors.People == a, 'LastName'].values.tolist()
+			l = [m for m in l if pd.notnull(m)]
+			#print(f"{l=}")
+			if len(l) == 1:
+				cita.loc[cita.People == a, 'author'] = l[0]
+			elif len(l) == 2:
+				cita.loc[cita.People == a, 'author'] = l[0] + ' & ' + l[1]
+			elif len(l) > 2:
+				acc = ', '.join(l[:-1]) + ' & ' + l[-1]
+				cita.loc[cita.People == a, 'author'] = acc
+			
+		rec_table = rec_table.merge(cita, how='left', left_on='refAuthor', right_on='People')
+		rec_table['bibliographicCitation'] = rec_table.apply(get_citation, axis=1)
+
+	else:
+		rec_table['bibliographicCitation'] = None
 
 	return rec_table
 
@@ -264,11 +267,13 @@ def validate_search():
 		"LEFT JOIN Taxa ON TaxonID=Identifications.Name",
 		"LEFT JOIN Locations ON LocationID=Occurrences.Location",
 		"LEFT JOIN Geocodings ON LocationID=Geocodings.Location",
+		#"LEFT JOIN "
 		"WHERE Geocoder = 1 AND "
 	)
 
 	query = " ".join(querybits)
 	criteria = []
+
 
 	if len(st.session_state.colectores) > 0:
 
@@ -283,7 +288,7 @@ def validate_search():
 		)
 
 		collstr = ", ".join(nums)
-		criteria.append(f"Collector IN ({collstr})")
+		criteria.append(f"Occurrences.Collector IN ({collstr})")
 
 	if len(st.session_state.taxon) > 0:
 		nums = []
@@ -319,6 +324,7 @@ def validate_search():
 			criteria.append(f"DateInit = '{st.session_state.fecha_0}'")
 
 	query += " AND ".join(criteria)
+	#error_window(f"{query=}")
 	recs = pd.read_sql(query, st.session_state.connection)
 	recs = set_taxonomic_fields(recs)
 	recs = literature_fields(recs)
